@@ -8,12 +8,12 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build Windows Release
         run: dotnet msbuild .\SystemInfoCollector.Windows.csproj /t:Rebuild /p:Configuration=Release /v:minimal
       - name: Run Windows rule self-tests
         run: .\bin\Release\SystemInfoCollector-Windows.exe --self-test-xc
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: SystemInfoCollector-Windows
           path: |
@@ -23,7 +23,7 @@ jobs:
   linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check shell syntax
         run: sh -n ./systeminfo-linux.sh
       - name: Run Linux fixture tests
