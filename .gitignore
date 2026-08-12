@@ -1,0 +1,10 @@
+.vs/
+bin/
+obj/
+*.user
+*.suo
+*.pdb
+系统信息检测报告_*.txt
+系统信息检测报告_*.json
+系统信息检测报告_*.csv
+release/

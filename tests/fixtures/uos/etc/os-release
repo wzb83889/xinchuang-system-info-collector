@@ -1,0 +1,5 @@
+PRETTY_NAME="UnionTech OS Desktop 20 Professional"
+NAME="UnionTech OS Desktop"
+VERSION_ID="20"
+ID=uos
+ID_LIKE=debian

@@ -1,0 +1,5 @@
+PRETTY_NAME="openKylin 2.0 SP1"
+NAME="openKylin"
+VERSION_ID="2.0"
+ID=openkylin
+ID_LIKE=debian

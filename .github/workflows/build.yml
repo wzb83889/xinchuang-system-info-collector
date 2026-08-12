@@ -1,0 +1,30 @@
+name: build-and-test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Windows Release
+        run: dotnet msbuild .\SystemInfoCollector.Windows.csproj /t:Rebuild /p:Configuration=Release /v:minimal
+      - name: Run Windows rule self-tests
+        run: .\bin\Release\SystemInfoCollector-Windows.exe --self-test-xc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SystemInfoCollector-Windows
+          path: |
+            bin/Release/SystemInfoCollector-Windows.exe
+            bin/Release/SystemInfoCollector-Windows.exe.config
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check shell syntax
+        run: sh -n ./systeminfo-linux.sh
+      - name: Run Linux fixture tests
+        run: sh ./tests/run-linux-tests.sh
