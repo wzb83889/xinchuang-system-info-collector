@@ -13,6 +13,10 @@ jobs:
         run: dotnet msbuild .\SystemInfoCollector.Windows.csproj /t:Rebuild /p:Configuration=Release /v:minimal
       - name: Run Windows rule self-tests
         run: .\bin\Release\SystemInfoCollector-Windows.exe --self-test-xc
+      - name: Build Windows regression suite
+        run: dotnet msbuild .\tests\SystemInfoCollector.Regression.csproj /t:Rebuild /p:Configuration=Release /v:minimal
+      - name: Run Windows collection regressions
+        run: '"" | .\tests\bin\Release\SystemInfoCollector-Regression.exe'
       - uses: actions/upload-artifact@v7
         with:
           name: SystemInfoCollector-Windows

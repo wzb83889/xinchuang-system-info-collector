@@ -13,10 +13,10 @@ using Microsoft.Win32;
 
 namespace SystemInfoTest
 {
-    internal class Program
+    internal partial class Program
     {
-        private const string AppName = "Windows 企业IT信创系统信息采集工具（V1.3.0）";
-        private const string Version = "1.3.0";
+        private const string AppName = "Windows 企业IT信创系统信息采集工具（V1.3.1）";
+        private const string Version = "1.3.1";
         private const string CollectUrlEnvironmentVariable = "SYSTEMINFO_COLLECT_URL";
         private const string CollectUserEnvironmentVariable = "SYSTEMINFO_COLLECT_USER";
         private const int StdOutputHandle = -11;
@@ -97,7 +97,7 @@ namespace SystemInfoTest
             new DetectionModule("5", "硬盘驱动器", "物理硬盘驱动器和逻辑磁盘汇总", CollectDisk),
             new DetectionModule("6", "显卡", "显卡名称、显存、驱动版本", CollectVideo),
             new DetectionModule("7", "主板和 BIOS", "主板信息、BIOS 信息、多源序列号兜底", CollectBoardAndBios),
-            new DetectionModule("8", "网络", "启用网卡、MAC、IP、网关", CollectNetwork),
+            new DetectionModule("8", "网络", "物理网卡、状态、MAC、IP、网关", CollectNetwork),
             new DetectionModule("9", "音频设备", "声卡名称和制造商", CollectAudioDevices),
             new DetectionModule("10", "电池信息", "电池状态和预计剩余时间", CollectBatteryDevices),
             new DetectionModule("11", "显示器信息", "显示器名称和分辨率", CollectMonitorDevices),
@@ -198,20 +198,13 @@ namespace SystemInfoTest
 
         private static void ConfigureConsole()
         {
+            // Keep encoding setup independent: a failure to set output must not skip input setup.
+            try { if (!Console.IsOutputRedirected) Console.OutputEncoding = Encoding.UTF8; } catch { }
+            try { if (!Console.IsInputRedirected) Console.InputEncoding = Encoding.UTF8; } catch { }
             try
             {
-                if (!Console.IsOutputRedirected)
-                {
-                    Console.OutputEncoding = Encoding.UTF8;
-                }
-
-                if (!Console.IsInputRedirected)
-                {
-                    Console.InputEncoding = Encoding.UTF8;
-                }
-
                 _supportsAnsi = TryEnableAnsiOutput() || IsAnsiLikeTerminal();
-                Console.Title = AppName1 + " " + Version;
+                Console.Title = AppName1;
             }
             catch
             {
@@ -380,7 +373,8 @@ namespace SystemInfoTest
                 string targetDirectory = args.Length > 1 ? args[1] : GetPreferredCollectAddress();
                 string userName = args.Length > 2 ? args[2] : GetConfiguredCollectUserName();
                 string password = args.Length > 3 ? args[3] : "";
-                RunBatchCollection(targetDirectory, !Console.IsInputRedirected && !Console.IsOutputRedirected, userName, password);
+                bool interactive = !Console.IsInputRedirected && !Console.IsOutputRedirected;
+                Environment.ExitCode = RunBatchCollection(targetDirectory, interactive, userName, password) ? 0 : 1;
                 return true;
             }
 
@@ -407,7 +401,7 @@ namespace SystemInfoTest
             if (command.Equals("--help", StringComparison.OrdinalIgnoreCase) ||
                 command.Equals("/?", StringComparison.OrdinalIgnoreCase))
             {
-                Console.WriteLine("批量采集: SystemInfoCollector-Windows.exe --collect");
+                Console.WriteLine("交互式批量采集: 主菜单 5 → 2，或 SystemInfoCollector-Windows.exe --collect");
                 Console.WriteLine("指定 WebDAV: SystemInfoCollector-Windows.exe --collect \"https://server/DeviceReports\" user password");
                 Console.WriteLine("汇总统计: SystemInfoCollector-Windows.exe --merge \"\\\\server\\设备信息采集\"");
                 Console.WriteLine("信创规则自检: SystemInfoCollector-Windows.exe --self-test-xc");
@@ -598,8 +592,7 @@ namespace SystemInfoTest
             }
             else if (choice == "2")
             {
-                string targetDirectory = ResolveCollectDirectoryFromUser();
-                RunBatchCollection(targetDirectory, true, GetConfiguredCollectUserName(), "");
+                RunBatchCollection(GetPreferredCollectAddress(), true, GetConfiguredCollectUserName(), "", true);
                 Pause();
             }
             else if (choice == "3")
@@ -611,7 +604,7 @@ namespace SystemInfoTest
             }
         }
 
-        private static void RunBatchCollection(string targetDirectory, bool interactive, string webDavUserName, string webDavPassword)
+        private static bool RunBatchCollection(string targetDirectory, bool interactive, string webDavUserName, string webDavPassword, bool rememberAddress = false)
         {
             if (string.IsNullOrWhiteSpace(targetDirectory))
             {
@@ -627,15 +620,15 @@ namespace SystemInfoTest
                     WriteHeader(title);
                 }
 
-                CollectTarget collectTarget = ResolveAccessibleCollectTarget(targetDirectory, interactive, webDavUserName, webDavPassword);
+                CollectTarget collectTarget = ResolveAccessibleCollectTarget(targetDirectory, interactive, webDavUserName, webDavPassword, rememberAddress);
                 if (collectTarget == null)
                 {
-                    return;
+                    return false;
                 }
 
                 string department = interactive ? PromptDepartment() : "";
                 string userName = interactive ? PromptRequiredText("请输入该计算机设备使用人员姓名: ") : "";
-                string location = interactive ? PromptRequiredText("请输入当前设备使用位置（门牌号）: ") : "";
+                string location = interactive ? PromptRequiredText("请输入当前设备使用位置（门牌号/工位号）: ") : "";
                 _currentCollectDepartment = department;
                 _currentCollectUserName = userName;
                 _currentCollectLocation = location;
@@ -647,8 +640,8 @@ namespace SystemInfoTest
                 _lastReportTitle = title + " " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
                 _lastReportIncludeSource = false;
 
-                string departmentDirectoryName = SanitizeFileName(SafeFilePart(department));
-                string locationDirectoryName = SanitizeFileName(SafeFilePart(location));
+                string departmentDirectoryName = BuildArchiveSegment(department);
+                string locationDirectoryName = BuildArchiveSegment(location);
                 string fileIdentity = BuildCollectionFileIdentity(department, userName);
                 ReportSaveResult result;
                 if (collectTarget.IsWebDav)
@@ -664,95 +657,25 @@ namespace SystemInfoTest
                 WriteSuccess("批量归集完成，共生成 {0} 个文件。", result.Paths.Count);
                 foreach (string path in result.Paths)
                 {
-                    Console.WriteLine("  " + path);
+                    Console.WriteLine("  " + (collectTarget.IsWebDav ? Path.GetFileName(path) : path));
                 }
+                return true;
+            }
+            catch (OperationCanceledException ex)
+            {
+                WriteWarning(ex.Message);
             }
             catch (Exception ex)
             {
-                WriteError("批量归集失败: {0}", ex.Message);
+                WriteError("批量归集失败: {0}", GetSafeCollectFailure(ex));
             }
-        }
-
-        private static string ResolveCollectDirectoryFromUser()
-        {
-            string preferred = GetPreferredCollectAddress();
-            string configured = GetConfiguredCollectAddress();
-            if (!string.IsNullOrWhiteSpace(preferred) && !preferred.Equals(configured, StringComparison.OrdinalIgnoreCase))
-            {
-                Console.WriteLine("上次成功 WebDAV 地址: {0}", preferred);
-                if (!string.IsNullOrWhiteSpace(configured))
-                {
-                    Console.WriteLine("环境变量配置的 WebDAV 地址: {0}", configured);
-                }
-            }
-            else if (!string.IsNullOrWhiteSpace(preferred))
-            {
-                Console.WriteLine("默认 WebDAV 地址: {0}", preferred);
-            }
-            else
-            {
-                Console.WriteLine("尚未配置 WebDAV 地址。可输入地址，或设置 {0}。", CollectUrlEnvironmentVariable);
-            }
-
-            Console.Write("是否更换 WebDAV 地址? (Y/N，默认 N): ");
-            string answer = Console.ReadLine();
-            if (!string.IsNullOrWhiteSpace(answer) && answer.Trim().Equals("Y", StringComparison.OrdinalIgnoreCase))
-            {
-                Console.Write("请输入新的 WebDAV 地址: ");
-                string custom = Console.ReadLine();
-                if (!string.IsNullOrWhiteSpace(custom))
-                {
-                    return custom.Trim();
-                }
-
-                WriteWarning("未输入新地址。若没有已保存或环境变量配置的地址，本次归集将取消。");
-            }
-
-            return preferred;
-        }
-
-        private static CollectTarget ResolveAccessibleCollectTarget(string targetDirectory, bool interactive, string webDavUserName, string webDavPassword)
-        {
-            targetDirectory = string.IsNullOrWhiteSpace(targetDirectory) ? GetPreferredCollectAddress() : targetDirectory.Trim();
-            CollectTarget target = BuildCollectTarget(targetDirectory, webDavUserName, webDavPassword, interactive);
-            while (true)
-            {
-                Exception testError;
-                if (target == null)
-                {
-                    return null;
-                }
-
-                if (TestCollectTarget(target, interactive, out testError))
-                {
-                    SaveSuccessfulCollectAddress(target.Address);
-                    return target;
-                }
-
-                string message = GetCollectShareAccessFailureMessage(testError);
-                WriteError("批量归集失败: {0}请核实更换 WebDAV 地址、账号密码，或联系信息化管理员。", message);
-
-                if (!interactive)
-                {
-                    return null;
-                }
-
-                Console.Write("请输入新的 WebDAV 地址（直接回车取消批量归集）: ");
-                string custom = Console.ReadLine();
-                if (string.IsNullOrWhiteSpace(custom))
-                {
-                    WriteWarning("已取消批量归集。");
-                    return null;
-                }
-
-                target = BuildCollectTarget(custom.Trim(), GetConfiguredCollectUserName(), "", interactive);
-            }
+            return false;
         }
 
         private static string GetPreferredCollectAddress()
         {
-            string remembered = LoadSuccessfulCollectAddress();
-            return string.IsNullOrWhiteSpace(remembered) ? GetConfiguredCollectAddress() : remembered;
+            string configured = GetConfiguredCollectAddress();
+            return string.IsNullOrWhiteSpace(configured) ? LoadSuccessfulCollectAddress() : configured;
         }
 
         private static string GetConfiguredCollectAddress()
@@ -815,76 +738,6 @@ namespace SystemInfoTest
             return Path.Combine(root, "SystemInfoCollector", "last_collect_address.txt");
         }
 
-        private static CollectTarget BuildCollectTarget(string address, string userName, string password, bool interactive)
-        {
-            address = string.IsNullOrWhiteSpace(address) ? GetConfiguredCollectAddress() : address.Trim();
-            if (string.IsNullOrWhiteSpace(address))
-            {
-                WriteError("批量归集失败: 地址不能为空。请通过 --collect 参数或 {0} 环境变量提供。", CollectUrlEnvironmentVariable);
-                return null;
-            }
-            CollectTarget target = new CollectTarget();
-            target.Address = address.TrimEnd('\\', '/');
-            target.IsWebDav = IsWebDavAddress(target.Address);
-            if (!target.IsWebDav)
-            {
-                return target;
-            }
-
-            target.UserName = string.IsNullOrWhiteSpace(userName) ? GetConfiguredCollectUserName() : userName.Trim();
-            target.Password = password ?? "";
-            if (interactive)
-            {
-                Console.WriteLine("当前 WebDAV 账号: {0}", string.IsNullOrWhiteSpace(target.UserName) ? "未配置" : target.UserName);
-                Console.Write("是否更换 WebDAV 账号? (Y/N，默认 N): ");
-                string answer = Console.ReadLine();
-                if (!string.IsNullOrWhiteSpace(answer) && answer.Trim().Equals("Y", StringComparison.OrdinalIgnoreCase))
-                {
-                    string customUser = PromptRequiredText("请输入 WebDAV 账号: ");
-                    target.UserName = customUser;
-                }
-
-                target.Password = PromptPassword("请输入 WebDAV 密码: ");
-            }
-            else if (string.IsNullOrEmpty(target.Password))
-            {
-                WriteError("批量归集失败: WebDAV 密码不能为空。请使用参数: --collect \"{0}\" {1} password", target.Address, target.UserName);
-                return null;
-            }
-
-            return target;
-        }
-
-        private static bool TestCollectTarget(CollectTarget target, bool interactive, out Exception error)
-        {
-            error = null;
-            if (target == null || string.IsNullOrWhiteSpace(target.Address))
-            {
-                error = new DirectoryNotFoundException("目标地址不能为空。");
-                return false;
-            }
-
-            try
-            {
-                if (target.IsWebDav)
-                {
-                    TestWebDavTarget(target, interactive);
-                }
-                else
-                {
-                    TestLocalCollectDirectory(target.Address, interactive);
-                }
-
-                WriteSuccess("归集地址访问测试成功: {0}", target.Address);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                error = ex;
-                return false;
-            }
-        }
-
         private static void TestLocalCollectDirectory(string targetDirectory, bool interactive)
         {
             if (interactive)
@@ -908,58 +761,6 @@ namespace SystemInfoTest
             }
         }
 
-        private static void TestWebDavTarget(CollectTarget target, bool interactive)
-        {
-            string testDirectoryName = ".systeminfo_access_test_" + Environment.MachineName + "_" + Guid.NewGuid().ToString("N");
-            string testFileName = "probe.txt";
-
-            Console.WriteLine("正在测试 WebDAV 归集地址:");
-            Console.WriteLine("  目标地址: {0}", target.Address);
-            Console.WriteLine("  认证账号: {0}", target.UserName);
-
-            WriteConnectivityProgress("OPTIONS 探测服务", 15);
-            WebDavRequest(target, "OPTIONS", "", null, false);
-            Console.WriteLine();
-            Console.WriteLine("  来自 {0} 的响应: OPTIONS 成功", GetHostText(target.Address));
-
-            WriteConnectivityProgress("创建测试目录", 40);
-            TryCreateWebDavDirectory(target, testDirectoryName);
-            Console.WriteLine();
-            Console.WriteLine("  来自 {0} 的响应: MKCOL 成功", GetHostText(target.Address));
-
-            WriteConnectivityProgress("上传测试文件", 70);
-            WebDavRequest(target, "PUT", CombineWebDavPath(testDirectoryName, testFileName), Encoding.UTF8.GetBytes("SystemInfo WebDAV access test"), true);
-            Console.WriteLine();
-            Console.WriteLine("  来自 {0} 的响应: PUT 成功", GetHostText(target.Address));
-
-            WriteConnectivityProgress("清理测试文件", 95);
-            WebDavRequest(target, "DELETE", CombineWebDavPath(testDirectoryName, testFileName), null, false);
-            TryDeleteWebDav(target, testDirectoryName);
-            WriteConnectivityProgress("访问测试完成", 100);
-            Console.WriteLine();
-            Console.WriteLine("  来自 {0} 的响应: WebDAV 访问测试成功", GetHostText(target.Address));
-        }
-
-        private static string GetCollectShareAccessFailureMessage(Exception error)
-        {
-            if (error is UnauthorizedAccessException)
-            {
-                return "归集地址无法访问、账号密码错误或没有写入权限。";
-            }
-
-            if (error is System.Net.WebException)
-            {
-                System.Net.WebException webError = (System.Net.WebException)error;
-                System.Net.HttpWebResponse response = webError.Response as System.Net.HttpWebResponse;
-                if (response != null && (response.StatusCode == System.Net.HttpStatusCode.Unauthorized || response.StatusCode == System.Net.HttpStatusCode.Forbidden))
-                {
-                    return "WebDAV 账号密码错误或没有写入权限。";
-                }
-            }
-
-            return "找不到网络路径或 WebDAV 服务不可达。";
-        }
-
         private static bool IsWebDavAddress(string address)
         {
             return !string.IsNullOrWhiteSpace(address) &&
@@ -972,7 +773,7 @@ namespace SystemInfoTest
             Console.Write(prompt);
             if (Console.IsInputRedirected)
             {
-                return Console.ReadLine() ?? "";
+                return UnicodeRegistration.ReadLine() ?? "";
             }
 
             StringBuilder sb = new StringBuilder();
@@ -1095,19 +896,6 @@ namespace SystemInfoTest
             return string.Join("/", parts.Select(part => Uri.EscapeDataString(part)).ToArray());
         }
 
-        private static string GetHostText(string address)
-        {
-            try
-            {
-                Uri uri = new Uri(address);
-                return uri.Host;
-            }
-            catch
-            {
-                return address;
-            }
-        }
-
         private static void UploadTextToWebDav(CollectTarget target, string relativePath, string content)
         {
             WebDavRequest(target, "PUT", relativePath, new UTF8Encoding(true).GetBytes(content ?? ""), true);
@@ -1134,14 +922,15 @@ namespace SystemInfoTest
             {
                 WebDavRequest(target, "MKCOL", relativePath, null, false);
             }
-            catch (System.Net.WebException ex)
+            catch (WebDavRequestFailure ex)
             {
-                System.Net.HttpWebResponse response = ex.Response as System.Net.HttpWebResponse;
-                if (response != null && ((int)response.StatusCode == 405 || (int)response.StatusCode == 409))
+                if (ex.Status == 405)
                 {
-                    return;
+                    // MKCOL on an existing resource returns 405. Confirm it is the exact
+                    // collection requested, not a file or an unsupported server operation.
+                    if (WebDavCollectionExists(target, relativePath)) return;
+                    throw new WebDavDirectoryFailure("创建目录失败：此位置未确认为已有目录，可能存在同名文件或无法核实目录类型（HTTP 405）。请联系信息化管理员。");
                 }
-
                 throw;
             }
         }
@@ -1153,39 +942,6 @@ namespace SystemInfoTest
                 WebDavRequest(target, "DELETE", relativePath, null, false);
             }
             catch
-            {
-            }
-        }
-
-        private static void WebDavRequest(CollectTarget target, string method, string relativePath, byte[] payload, bool hasBody)
-        {
-            string url = target.Address.TrimEnd('/');
-            if (!string.IsNullOrWhiteSpace(relativePath))
-            {
-                url += "/" + EncodeWebDavRelativePath(CombineWebDavPath(relativePath));
-            }
-
-            System.Net.HttpWebRequest request = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(url);
-            request.Method = method;
-            request.Timeout = 12000;
-            request.ReadWriteTimeout = 12000;
-            request.PreAuthenticate = true;
-            request.Credentials = new System.Net.NetworkCredential(target.UserName, target.Password);
-            string token = Convert.ToBase64String(Encoding.UTF8.GetBytes(target.UserName + ":" + target.Password));
-            request.Headers[System.Net.HttpRequestHeader.Authorization] = "Basic " + token;
-
-            if (hasBody)
-            {
-                byte[] actualPayload = payload ?? new byte[0];
-                request.ContentLength = actualPayload.Length;
-                request.ContentType = "application/octet-stream";
-                using (Stream stream = request.GetRequestStream())
-                {
-                    stream.Write(actualPayload, 0, actualPayload.Length);
-                }
-            }
-
-            using (System.Net.HttpWebResponse response = (System.Net.HttpWebResponse)request.GetResponse())
             {
             }
         }
@@ -1202,7 +958,9 @@ namespace SystemInfoTest
             while (true)
             {
                 Console.Write("请输入部门序号，或直接输入其他部门名称: ");
-                string input = Console.ReadLine();
+                string input = UnicodeRegistration.ReadLine();
+                if (input == null) throw new OperationCanceledException("已取消登记。");
+                if (UnicodeRegistration.HasDamagedText(input)) { WriteWarning("输入含有无法识别的字符，请重新输入部门。"); continue; }
                 if (string.IsNullOrWhiteSpace(input))
                 {
                     WriteWarning("部门不能为空，请重新输入。");
@@ -1231,7 +989,9 @@ namespace SystemInfoTest
             while (true)
             {
                 Console.Write(prompt);
-                string value = Console.ReadLine();
+                string value = UnicodeRegistration.ReadLine();
+                if (value == null) throw new OperationCanceledException("已取消登记。");
+                if (UnicodeRegistration.HasDamagedText(value)) { WriteWarning("输入含有损坏或无法识别的字符，请重新输入；不会将乱码写入报告。"); continue; }
                 if (!string.IsNullOrWhiteSpace(value))
                 {
                     return value.Trim();
@@ -1246,7 +1006,7 @@ namespace SystemInfoTest
             ReportSection section = new ReportSection("批量归集登记信息");
             section.Add("部门", SafeText(department), "用户输入", IsMissing(department) ? ItemStatus.Warning : ItemStatus.Ok);
             section.Add("使用人员姓名", SafeText(userName), "用户输入", IsMissing(userName) ? ItemStatus.Warning : ItemStatus.Ok);
-            section.Add("使用位置", SafeText(location), "用户输入", IsMissing(location) ? ItemStatus.Warning : ItemStatus.Ok);
+            section.Add("门牌号/工位号", SafeText(location), "用户输入", IsMissing(location) ? ItemStatus.Warning : ItemStatus.Ok);
             section.Add("报告日期", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture), "系统时间");
             sections.Insert(0, section);
         }
@@ -1259,7 +1019,21 @@ namespace SystemInfoTest
                 SafeFilePart(department),
                 SafeFilePart(userName),
                 SafeFilePart(Environment.MachineName),
-                DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture));
+                DateTime.Now.ToString("yyyyMMdd_HHmmss_fff", CultureInfo.InvariantCulture) + "_" + Guid.NewGuid().ToString("N").Substring(0, 12));
+        }
+
+        private static string BuildArchiveSegment(string value)
+        {
+            string segment = SanitizeFileName(SafeFilePart(value)).TrimEnd(' ', '.');
+            if (segment.Length == 0)
+            {
+                return "未填写";
+            }
+
+            // Windows device names are reserved even when followed by an extension.
+            return Regex.IsMatch(segment, @"^(CON|CONIN\$|CONOUT\$|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³]) *(?:[.]|$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+                ? "_" + segment
+                : segment;
         }
 
         private static string SafeFilePart(string value)
@@ -1269,6 +1043,7 @@ namespace SystemInfoTest
 
         private static List<ReportSection> CollectModulesForExport(IEnumerable<string> moduleKeys, string title, bool showProgress)
         {
+            _networkSnapshot = null;
             List<ReportSection> sections = new List<ReportSection>();
             List<DetectionModule> selectedModules = Modules.Where(m => moduleKeys.Contains(m.Key)).ToList();
             int current = 0;
@@ -1295,7 +1070,6 @@ namespace SystemInfoTest
                         section.Add("模块状态", "检测失败: " + ex.Message, "程序异常", ItemStatus.Error);
                     }
 
-                    sections.Add(section);
 
                     if (showProgress)
                     {
@@ -1303,6 +1077,8 @@ namespace SystemInfoTest
                         progress.Stop();
                     }
                 }
+                if (module.Key == "8") section = EnsureBatchNetworkComplete(section, showProgress);
+                sections.Add(section);
             }
 
             return sections;
@@ -1327,20 +1103,7 @@ namespace SystemInfoTest
             section.Add("操作系统", SafeText(osName), "Win32_OperatingSystem.Caption");
             section.Add("CPU", SafeText(cpuName), "Win32_Processor.Name");
 
-            int nicIndex = 0;
-            WmiForEach("SELECT * FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled = True", delegate(ManagementObject nic)
-            {
-                nicIndex++;
-                string name = SafeText(GetValue(nic, "Description"));
-                string mac = SafeText(GetValue(nic, "MACAddress"));
-                string ips = JoinArray(nic["IPAddress"]);
-                section.Add("网卡" + nicIndex, name + " | MAC: " + mac + " | IP: " + ips, "Win32_NetworkAdapterConfiguration");
-            });
-
-            if (nicIndex == 0)
-            {
-                section.Add("网卡", "未检测到已启用网卡。", "Win32_NetworkAdapterConfiguration", ItemStatus.Warning);
-            }
+            AddNetworkReport(section, false);
 
             return section;
         }
@@ -1349,6 +1112,7 @@ namespace SystemInfoTest
         {
             ClearConsole();
             WriteHeader("基础硬件信息检测");
+            _networkSnapshot = null;
 
             List<ReportSection> sections = new List<ReportSection>();
             using (ProgressDisplay progress = new ProgressDisplay(1, 0))
@@ -1385,6 +1149,7 @@ namespace SystemInfoTest
         {
             ClearConsole();
             WriteHeader(title);
+            _networkSnapshot = null;
 
             List<ReportSection> sections = new List<ReportSection>();
             List<DetectionModule> selectedModules = Modules.Where(m => moduleKeys.Contains(m.Key)).ToList();
@@ -1672,131 +1437,6 @@ namespace SystemInfoTest
             section.Add("推荐序列号", serial.Value, serial.Source, serial.Status);
             section.EnsureNotEmpty("未检测到主板或 BIOS 信息。");
             return section;
-        }
-
-        private static ReportSection CollectNetwork()
-        {
-            ReportSection section = new ReportSection("网络信息");
-            int index = 0;
-            WmiForEach("SELECT * FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled = True", delegate(ManagementObject nic)
-            {
-                index++;
-                section.AddDivider("网卡" + index);
-                section.Add("描述", GetValue(nic, "Description"), "Win32_NetworkAdapterConfiguration.Description");
-                section.Add("MAC", GetValue(nic, "MACAddress"), "Win32_NetworkAdapterConfiguration.MACAddress");
-                section.Add("IP", JoinArray(nic["IPAddress"]), "Win32_NetworkAdapterConfiguration.IPAddress");
-                section.Add("子网掩码", JoinArray(nic["IPSubnet"]), "Win32_NetworkAdapterConfiguration.IPSubnet");
-                section.Add("默认网关", JoinArray(nic["DefaultIPGateway"]), "Win32_NetworkAdapterConfiguration.DefaultIPGateway");
-            });
-
-            if (index > 0)
-            {
-                section.Insert(0, "检测到网卡设备数量", index.ToString(CultureInfo.InvariantCulture) + " 个", "Win32_NetworkAdapterConfiguration");
-                string reviewMessage = GetLaptopNetworkReviewMessage();
-                if (!IsMissing(reviewMessage))
-                {
-                    section.Insert(1, "笔记本网卡核实提示", reviewMessage, "Win32_NetworkAdapter", ItemStatus.Warning);
-                }
-            }
-
-            section.EnsureNotEmpty("未检测到已启用的网卡信息。");
-            return section;
-        }
-
-        private static string GetLaptopNetworkReviewMessage()
-        {
-            string pcSystemType = FirstWmiValue("SELECT * FROM Win32_ComputerSystem", "PCSystemType");
-            if (ToInt(pcSystemType) != 2)
-            {
-                return "";
-            }
-
-            NetworkAdapterStats stats = GetNetworkAdapterStats();
-            bool onlyWifiEnabled = stats.WirelessEnabled > 0 && stats.WiredEnabled == 0;
-            if (onlyWifiEnabled && stats.WiredDisabled > 0)
-            {
-                return "需核实：笔记本电脑当前仅检测到 WiFi 正在使用，且检测到有线网络适配器已禁用。";
-            }
-
-            if (onlyWifiEnabled && stats.WiredTotal == 0)
-            {
-                return "需核实：笔记本电脑当前仅检测到 WiFi 设备，可能为未集成有线网卡设备的笔记本电脑。";
-            }
-
-            if (onlyWifiEnabled)
-            {
-                return "需核实：笔记本电脑当前未检测到已启用的有线网络适配器。";
-            }
-
-            if (stats.WiredDisabled > 0)
-            {
-                return "需核实：检测到有线网络适配器已禁用。";
-            }
-
-            return "";
-        }
-
-        private static NetworkAdapterStats GetNetworkAdapterStats()
-        {
-            NetworkAdapterStats stats = new NetworkAdapterStats();
-            WmiForEach("SELECT * FROM Win32_NetworkAdapter", delegate(ManagementObject adapter)
-            {
-                string name = GetValue(adapter, "Name");
-                string description = GetValue(adapter, "Description");
-                string adapterType = GetValue(adapter, "AdapterType");
-                string netConnectionId = GetValue(adapter, "NetConnectionID");
-                string text = (name + " " + description + " " + adapterType + " " + netConnectionId).Trim();
-                if (IsVirtualOrNonPhysicalNetworkAdapter(text))
-                {
-                    return;
-                }
-
-                bool enabled = GetValue(adapter, "NetEnabled").Equals("True", StringComparison.OrdinalIgnoreCase);
-                if (IsWirelessNetworkAdapter(text))
-                {
-                    stats.WirelessTotal++;
-                    if (enabled)
-                    {
-                        stats.WirelessEnabled++;
-                    }
-                    return;
-                }
-
-                if (IsWiredNetworkAdapter(text))
-                {
-                    stats.WiredTotal++;
-                    if (enabled)
-                    {
-                        stats.WiredEnabled++;
-                    }
-                    else
-                    {
-                        stats.WiredDisabled++;
-                    }
-                }
-            });
-
-            return stats;
-        }
-
-        private static bool IsWirelessNetworkAdapter(string text)
-        {
-            return ContainsAnyText(text, "Wi-Fi", "WiFi", "Wireless", "WLAN", "802.11", "无线");
-        }
-
-        private static bool IsWiredNetworkAdapter(string text)
-        {
-            if (IsWirelessNetworkAdapter(text))
-            {
-                return false;
-            }
-
-            return ContainsAnyText(text, "Ethernet", "以太网", "有线", "Gigabit", "GbE", "2.5G", "10G", "PCIe", "RJ45", "802.3", "LAN");
-        }
-
-        private static bool IsVirtualOrNonPhysicalNetworkAdapter(string text)
-        {
-            return ContainsAnyText(text, "Bluetooth", "蓝牙", "Virtual", "Hyper-V", "VMware", "VirtualBox", "TAP", "VPN", "WAN Miniport", "Loopback", "Teredo", "Kernel Debug", "Npcap");
         }
 
         private static ReportSection CollectAudioDevices()
@@ -3500,7 +3140,7 @@ namespace SystemInfoTest
                 "报告类型",
                 "部门",
                 "使用人员姓名",
-                "使用位置",
+                "门牌号/工位号",
                 "计算机名",
                 "品牌",
                 "型号",
@@ -3515,7 +3155,7 @@ namespace SystemInfoTest
                 "内存插槽占用",
                 "硬盘驱动器",
                 "网卡信息",
-                "笔记本网卡核实提示",
+                "网卡核实提示",
                 "信创判断结果",
                 "信创置信度"
             };
@@ -3526,7 +3166,7 @@ namespace SystemInfoTest
                 title,
                 FindItemValueByNames(sections, "部门"),
                 FindItemValueByNames(sections, "使用人员姓名"),
-                FindItemValueByNames(sections, "使用位置"),
+                FindItemValueByNames(sections, "门牌号/工位号", "使用位置"),
                 FirstNonEmpty(FindItemValueByNames(sections, "计算机名"), Environment.MachineName),
                 FindItemValueByNames(sections, "制造商", "品牌"),
                 FindItemValueByNames(sections, "型号"),
@@ -3541,15 +3181,22 @@ namespace SystemInfoTest
                 FindItemValueByNames(sections, "内存插槽占用"),
                 BuildDiskSummaryForCsv(sections),
                 BuildNetworkSummaryForCsv(sections),
-                FindItemValueByNames(sections, "笔记本网卡核实提示"),
+                FindItemValueByNames(sections, "网卡核实提示"),
                 FindItemValueByNames(sections, "判断结果"),
-                FindItemValueByNames(sections, "线索分值", "置信度")
+                FindItemValueByNames(sections, "置信度")
             };
 
-            StringBuilder sb = new StringBuilder();
-            sb.AppendLine(ToCsvLine(headers));
-            sb.AppendLine(ToCsvLine(values));
-            return sb.ToString();
+            var row = headers.Select((header, index) => new { header, value = values[index] }).ToDictionary(x => x.header, x => x.value, StringComparer.Ordinal);
+            var network = sections.FirstOrDefault(section => section.NetworkCards != null);
+            if (network != null)
+            {
+                row.Remove("网卡信息");
+                row["网卡数量"] = network.NetworkCards.Count.ToString(CultureInfo.InvariantCulture);
+                row["MAC采集结论"] = network.NetworkConclusion;
+                for (int i = 0; i < network.NetworkCards.Count; i++) row["网卡" + (i + 1)] = network.NetworkCards[i];
+            }
+            CollectionCsv.NormalizeRow(row, null);
+            return CollectionCsv.Render(new[] { row });
         }
 
         private static string BuildDiskSummaryForCsv(List<ReportSection> sections)
@@ -3572,33 +3219,7 @@ namespace SystemInfoTest
 
         private static string BuildNetworkSummaryForCsv(List<ReportSection> sections)
         {
-            List<string> adapters = new List<string>();
-            int index = 0;
-            WmiForEach("SELECT * FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled = True", delegate(ManagementObject nic)
-            {
-                string description = SafeText(GetValue(nic, "Description"));
-                string mac = SafeText(GetValue(nic, "MACAddress"));
-                string ip = SafeText(JoinArray(nic["IPAddress"]));
-                if (IsMissing(mac) && IsMissing(ip))
-                {
-                    return;
-                }
-
-                index++;
-                List<string> parts = new List<string>();
-                parts.Add("网卡" + index.ToString(CultureInfo.InvariantCulture));
-                parts.Add(description);
-                parts.Add("MAC " + mac);
-                parts.Add("IP " + ip);
-                adapters.Add(string.Join(" | ", parts.ToArray()));
-            });
-
-            if (adapters.Count == 0)
-            {
-                return FindItemValueByNames(sections, "检测到网卡设备数量");
-            }
-
-            return adapters.Count.ToString(CultureInfo.InvariantCulture) + " 个；" + string.Join("；", adapters.ToArray());
+            return sections.Select(section => section.NetworkSummary).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? "未采集";
         }
 
         private static void MergeCollectedReports(string sourceDirectory)
@@ -3617,56 +3238,11 @@ namespace SystemInfoTest
                     return;
                 }
 
-                string[] files = Directory.GetFiles(sourceDirectory, "*.csv", SearchOption.AllDirectories)
-                    .Where(file => !Path.GetFileName(file).StartsWith("设备信息统计表_", StringComparison.OrdinalIgnoreCase))
-                    .ToArray();
-                if (files.Length == 0)
-                {
-                    WriteWarning("未找到可汇总的采集 CSV 文件。");
-                    return;
-                }
-
-                Array.Sort(files, StringComparer.OrdinalIgnoreCase);
-                string header = null;
-                List<string> rows = new List<string>();
-                foreach (string file in files)
-                {
-                    string[] lines = File.ReadAllLines(file, Encoding.UTF8);
-                    if (lines.Length < 2)
-                    {
-                        continue;
-                    }
-
-                    if (header == null)
-                    {
-                        header = lines[0];
-                    }
-
-                    for (int i = 1; i < lines.Length; i++)
-                    {
-                        if (!string.IsNullOrWhiteSpace(lines[i]))
-                        {
-                            rows.Add(lines[i]);
-                        }
-                    }
-                }
-
-                if (rows.Count == 0)
-                {
-                    WriteWarning("采集 CSV 文件中没有可汇总的数据行。");
-                    return;
-                }
-
-                string outputPath = Path.Combine(sourceDirectory, "设备信息统计表_" + DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture) + ".csv");
-                StringBuilder sb = new StringBuilder();
-                sb.AppendLine(header);
-                foreach (string row in rows)
-                {
-                    sb.AppendLine(row);
-                }
-                File.WriteAllText(outputPath, sb.ToString(), new UTF8Encoding(true));
-                WriteSuccess("设备信息统计表已生成: {0}", outputPath);
-                Console.WriteLine("汇总设备数量: {0}", rows.Count);
+                var merged = CollectionCsv.MergeDirectory(sourceDirectory);
+                WriteSuccess("设备信息统计表已生成: {0}", merged.Path);
+                Console.WriteLine("汇总记录数量: {0}；姓名待核实: {1}；读取异常文件: {2}", merged.Rows, merged.BadNames, merged.Skipped);
+                if (merged.BadNames > 0) WriteWarning("部分旧报告的姓名已损坏或未填写，请按“姓名校验”列核实；未猜测或替换真实姓名。");
+                if (merged.Skipped > 0) WriteWarning("部分CSV无法安全读取，请查看同时生成的读取异常清单，原文件未改动。");
             }
             catch (Exception ex)
             {
@@ -3698,22 +3274,6 @@ namespace SystemInfoTest
             }
 
             return "";
-        }
-
-        private static string ToCsvLine(IEnumerable<string> values)
-        {
-            return string.Join(",", values.Select(EscapeCsvValue).ToArray());
-        }
-
-        private static string EscapeCsvValue(string value)
-        {
-            value = value ?? "";
-            if (value.IndexOfAny(new[] { ',', '"', '\r', '\n' }) >= 0)
-            {
-                return "\"" + value.Replace("\"", "\"\"") + "\"";
-            }
-
-            return value;
         }
 
         private static string JsonString(string value)
@@ -3768,7 +3328,7 @@ namespace SystemInfoTest
             WriteFeatureLine("■", "完整检测", "覆盖主板 BIOS、内存、硬盘、显卡、音频、显示器、打印机等硬件明细。");
             WriteFeatureLine("✓", "复核增强", "主板序列号兜底、内存 DDR 代数、笔记本网卡状态与设备类型规则联动判断。");
             WriteFeatureLine("★", "信创判定", "按品牌、型号、CPU、操作系统四类规则评分，输出命中线索并提示人工复核。");
-            WriteFeatureLine("▣", "批量归集", "支持 txt/json/csv 报告上传、部门与门牌号归档、共享目录统计表汇总。");
+            WriteFeatureLine("▣", "批量归集", "支持 txt/json/csv 报告上传、按部门和门牌号/工位号归档、共享目录统计表汇总。");
             WriteFeatureLine("→", "易用体验", "彩色终端、动态进度条、实时检测时间和菜单化交互，降低一线采集成本。");
             Console.WriteLine();
         }
@@ -4318,15 +3878,6 @@ namespace SystemInfoTest
         public string Password { get; set; }
     }
 
-    internal class NetworkAdapterStats
-    {
-        public int WirelessTotal { get; set; }
-        public int WirelessEnabled { get; set; }
-        public int WiredTotal { get; set; }
-        public int WiredEnabled { get; set; }
-        public int WiredDisabled { get; set; }
-    }
-
     internal class ReportSection
     {
         public ReportSection(string title)
@@ -4337,6 +3888,9 @@ namespace SystemInfoTest
 
         public string Title { get; private set; }
         public List<InfoItem> Items { get; private set; }
+        public string NetworkSummary { get; set; }
+        public List<string> NetworkCards { get; set; }
+        public string NetworkConclusion { get; set; }
 
         public void Add(string name, string value, string source, ItemStatus status = ItemStatus.Ok)
         {

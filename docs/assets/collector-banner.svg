@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="290" viewBox="0 0 960 290" role="img" aria-labelledby="title desc">
+  <title id="title">SystemInfo Collector</title>
+  <desc id="desc">Windows and Linux device inventory with hardware, network and report stages.</desc>
+  <defs>
+    <linearGradient id="bg" x2="100%" y2="100%"><stop stop-color="#111c36"/><stop offset="1" stop-color="#08101f"/></linearGradient>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#8aa7d3" stroke-opacity=".13"/></pattern>
+  </defs>
+  <rect width="960" height="290" rx="20" fill="url(#bg)"/>
+  <rect x="1" y="1" width="958" height="288" rx="19" fill="url(#grid)" stroke="#304363"/>
+  <path d="M43 50h31l13 13v24l-13 13H43L30 87V63z" fill="#152c50" stroke="#518cfa"/>
+  <path d="m44 67 8 8-8 8m14 0h14" fill="none" stroke="#92bcff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="103" y="82" fill="#a8c7ff" font-family="Consolas,monospace" font-size="16" letter-spacing="3">DEVICE INVENTORY</text>
+  <text x="34" y="150" fill="#f0f6ff" font-family="system-ui,Segoe UI,sans-serif" font-size="49" font-weight="700">SystemInfo Collector</text>
+  <text x="37" y="190" fill="#bfd0e9" font-family="Microsoft YaHei,Noto Sans CJK SC,system-ui,sans-serif" font-size="23">企业 IT 信创系统信息采集工具</text>
+  <g font-family="Consolas,monospace" font-size="14" font-weight="600">
+    <rect x="37" y="217" width="94" height="29" rx="6" fill="#193661"/>
+    <text x="55" y="236" fill="#c0d6ff">WINDOWS</text>
+    <rect x="141" y="217" width="76" height="29" rx="6" fill="#103a3a"/>
+    <text x="158" y="236" fill="#a9f1dd">LINUX</text>
+  </g>
+  <rect x="580" y="43" width="340" height="200" rx="12" fill="#080f1d" stroke="#3b5174"/>
+  <path d="M580 79h340" stroke="#3b5174"/>
+  <g fill="#6e87aa"><circle cx="599" cy="61" r="3.5"/><circle cx="611" cy="61" r="3.5"/><circle cx="623" cy="61" r="3.5"/></g>
+  <text x="646" y="66" fill="#99afcc" font-family="Consolas,monospace" font-size="13">collection.run</text>
+  <g font-family="Consolas,monospace" font-size="15">
+    <text x="600" y="109" fill="#8fb9ff">&gt; collect inventory</text>
+    <text x="600" y="140" fill="#83e4c1">[OK]</text><text x="657" y="140" fill="#dde9f9">Hardware profile</text>
+    <text x="600" y="166" fill="#83e4c1">[OK]</text><text x="657" y="166" fill="#dde9f9">Physical network</text>
+    <text x="600" y="192" fill="#83e4c1">[OK]</text><text x="657" y="192" fill="#dde9f9">TXT / JSON / CSV</text>
+  </g>
+  <rect x="600" y="213" width="300" height="6" rx="3" fill="#4b8dff"/>
+</svg>

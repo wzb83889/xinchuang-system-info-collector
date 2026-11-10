@@ -1,5 +1,21 @@
 # Changelog
 
+## V1.3.1 - 2026-11-10
+
+### 新增
+
+- Windows 简要、完整和批量采集共用物理网卡清单。可读取 MAC 的禁用或断开网卡继续归档，缺失时仅重试网络模块。
+- 汇总 CSV 增加网卡数量、MAC 采集结论、各网卡及姓名校验列，支持旧报告按列名归并。
+- 增加 Windows 采集回归套件，并接入 GitHub Actions。
+
+### 修复
+
+- 用 Unicode 控制台读取登记信息，拦截可识别的损坏姓名。
+- WebDAV 区分连通与登录验证，已有归档目录通过 PROPFIND 核验后复用。
+- 防护归档路径、重复文件名及 CSV 公式前缀。
+
+公开版沿用运行时部署配置。参见 [开发调试复盘](docs/development-retrospective-fix2.md) 和 [发布前代码审查](docs/release-review-v1.3.1.md)。
+
 ## V1.3.0 - 2026-08-12
 
 ### Added
